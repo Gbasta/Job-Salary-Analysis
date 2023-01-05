@@ -1,5 +1,6 @@
 # Job Salary Analysis
 Analysis and interpretation of data based on data roles in the job market.
+
 See the full project by posting the github html link here: https://htmlpreview.github.io/
 
 The data has features of job title, work year, experience level, salary, remote ratio, and company size.
