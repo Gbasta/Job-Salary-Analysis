@@ -9,7 +9,7 @@ To determine if a model is good enough for predicting, I analyzed the r-hat, nef
 
 To compare the predicting accuracy of each of the models, I created visualizations with a prior predictive check to see the errors of each model and then used ELPD with loo to verify.
 
-This all resulted in a hierarchical model to be best at predicting job salaries given the features in the dataset. This is expected, as a hierarchical model groups the jobs into groups based on their job title, whereas the other models were pooling all the jobs together to get more general results.
+This all resulted in a hierarchical model to be best at predicting job salaries given the features in the dataset. This is expected, as a hierarchical model groups the various job titles together, whereas the other models were pooling all the jobs together to get more general results. The hierarchical model fixes the expected salary slope, but varies the intercept to get different prediction linear regressions for each job while also using the general slope of a completely pooled model.
 
 # Results
 The hierarchical model determines that there is no significant relationship between remote ratio and the year worked, but found the following significant relationships:
