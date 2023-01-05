@@ -3,6 +3,8 @@ Analysis and interpretation of data based on data roles in the job market.
 
 See the full project by posting the github html link here: https://htmlpreview.github.io/
 
+# The Code
+
 The data has features of job title, work year, experience level, salary, remote ratio, and company size.
 My goal with this code is to see how good of a predictor each of these features are for salary in the job market.
 
