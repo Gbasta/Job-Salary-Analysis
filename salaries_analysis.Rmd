@@ -1,0 +1,376 @@
+---
+title: "Final Project"
+author: "George Basta"
+date: "2022-12-09"
+output: html_document
+---
+
+```{r setup, results=F, message=FALSE, error=FALSE, warning=FALSE}
+# Load packages
+library("ggplot2")
+library("rstanarm")
+library("bayesplot")
+library("bayesrules")
+library("tidyverse")
+library("tidybayes")
+library("broom.mixed")
+```
+
+# The Data
+
+The data is based on data related roles and their yearly salaries, coming from
+
+<https://ai-jobs.net/salaries/download/>. The data is obtained from an anonymous questionnaire on the same website.
+
+The data has been getting collected from 2020 to present and it gives the experience level ranging from entry level to executive as well as the job title. There are also other features such as the remote ratio, with 0 being fully in person, 50 being hybrid, and 100 being fully remote, as well as company size.
+
+The goal is to find the best Bayesian linear regression model that predicts salaries the best for a given job and see which predictors are most useful for a job's salary.
+
+```{r}
+data <- read.csv("salaries.csv")
+data <- data %>% select(work_year,experience_level,job_title,salary_in_usd,remote_ratio,company_size)
+
+summary(data)
+```
+
+# Model 1: Complete Pooling without interaction term
+
+First, I want to see if salaries have been increasing over the years overall for any data job. Complete pooling will ignore the fact that different data roles are not necessarily independent in the market. The names are often misinterpreted by companies and different names may have the same idea of a role, making groups depend on each other.
+
+### Exploration of Predictors
+
+The below graphs how each variable compares to salary, as we will be using each as a predictor of salary in our model
+
+```{r}
+ggplot(data, aes(x = salary_in_usd, fill = factor(work_year))) +  geom_density(alpha = 0.5)+scale_x_continuous(labels = scales::comma)+labs(fill="Work Year")+xlab("Salary in USD")
+
+ggplot(data, aes(x = salary_in_usd, fill = factor(remote_ratio))) +  geom_density(alpha = 0.5)+scale_x_continuous(labels = scales::comma)+labs(fill="Remote Ratio")+xlab("Salary in USD")
+
+ggplot(data, aes(x = salary_in_usd, fill = factor(company_size))) +  geom_density(alpha = 0.5)+scale_x_continuous(labels = scales::comma)+labs(fill="Company Size")+xlab("Salary in USD")
+
+ggplot(data, aes(x = salary_in_usd, fill = factor(experience_level))) +  geom_density(alpha = 0.5)+scale_x_continuous(labels = scales::comma)+labs(fill="Experience Level")+xlab("Salary in USD")
+```
+
+It appears that salary has increased over the years, hybrid roles pay the least , and small companies pay worse than medium, which appear to pay the most. It is also expected that as experience level increases, so does salary, as the density plot verifies.
+
+### The model and prior choice
+
+For the model, we will assume the mean is somewhere around 105000 and beyond this, we will use weakly informative priors. I use this because that is this is the average commonly estimated in many articles for data roles, such as <https://datasciencedegree.wisconsin.edu/data-science/data-scientist-salary/>
+
+or the following
+
+<https://www.salary.com/research/salary/listing/data-scientist-salary>.
+
+<https://www.indeed.com/career/machine-learning-engineer/salaries>
+
+<https://www.glassdoor.com/Salaries/data-engineer-salary-SRCH_KO0,13.htm>
+
+```{r}
+model_1 <- stan_glm(
+  salary_in_usd ~ factor(work_year)+factor(remote_ratio)+company_size+experience_level, 
+  data = data, family = gaussian,
+  prior_intercept = normal(105000, 1000, autoscale=TRUE),
+  prior = normal(0, 5, autoscale = TRUE), 
+  prior_aux = exponential(1, autoscale = TRUE),
+  chains = 4, iter = 5000*2, seed = 10000)
+```
+
+### MCMC Diagnostics
+
+Here, we will take a look at the trace plots, autocorrelation, and densities.
+
+```{r}
+mcmc_trace(model_1, size = 0.1)
+mcmc_dens_overlay(model_1)
+mcmc_acf(model_1)
+
+neff_ratio(model_1)
+rhat(model_1)
+```
+
+The model seems to have very low lag on all 4 chains from the autocorrelation plots, so it is not slow mixing. The trace and density plots also give the idea that our chains are stable.
+
+The effective sample size ratio's are all very high, so the samples are fast mixing because they are independent. The r-hats are also all approximately 1, which verifies the chains being stable.
+
+### Model results interpretation
+
+```{r}
+tidy(model_1, conf.int = TRUE, conf.level = 0.80) %>% select(-std.error)
+
+```
+
+The intercept of 77392 above stands for the estimated salary for the year 2020 for fully in person large sized companies for people with entry level experience. Every other estimate is based on the difference in salary expectation from this if we were to change one of these variables to something else. For example, the estimation says that changing the company size from large to a medium sized company would reduce the salary expectation by 6385.
+
+The above shows many insignificant relationships. The 80% confidence interval for all these predicts is varying between a positive and negative relationship for work years 2021, 2022, and fully remote (100). This means that the salaries per year were all very similar and no significant change has happened and the difference between fully in person and fully remote salaries are virtually the same compared to hybrid.
+
+However, experience level and company size both seem to have a significant relationship on salary with 80% confidence. Being hybrid lowers salary by 21000 compared to not being hybrid, being in a medium or small sized company will tend to have lower salaries than a large sized company, and salary increases as experience level increases.
+
+The below plots the comparison for the significant predictors compared to the base year 2020, entry level experience, and large company that is fully in person.
+
+```{r}
+as.data.frame(model_1) %>%  
+  mutate(base_salary = `(Intercept)`,
+         small_company = `(Intercept)`+ company_sizeS,
+         medium_company = `(Intercept)`+ company_sizeM,
+         executive_exp_level = `(Intercept)`+ experience_levelEX,
+         mid_exp_level = `(Intercept)`+ experience_levelMI,
+         senior_exp_level = `(Intercept)`+ experience_levelSE,
+         hybrid = `(Intercept)`+`factor(remote_ratio)50`)%>%
+    mcmc_areas(pars = c("base_salary","small_company","medium_company","mid_exp_level","senior_exp_level","executive_exp_level","hybrid"))
+```
+
+The clear problem with this model is that it is treating all data roles the same even though we know they are not. Nonetheless, the general results are interesting and still useful.
+
+# Model 2: Complete Pooling with interaction term
+
+It may be useful to use an interaction term, as work year and remote ratio are most likely interacting with each other and depend on each other in some way due to quarantine in 2020 and the migration out of it. We will still include the other predictors such as experience level and company size.
+
+### The model
+
+Using the same prior understanding that the mean is somewhere between 105000, we can develop the interaction model below:
+
+```{r}
+model_2 <- stan_glm(
+  salary_in_usd ~ factor(work_year)+factor(remote_ratio)+factor(work_year):remote_ratio, 
+  data = data, family = gaussian,
+  prior_intercept = normal(105000, 1000, autoscale=TRUE),
+  prior = normal(0, 5, autoscale = TRUE), 
+  prior_aux = exponential(1, autoscale = TRUE),
+  chains = 4, iter = 5000*2, seed = 10000)
+
+```
+
+### MCMC Diagnostics
+
+```{r}
+mcmc_trace(model_2, size = 0.1)
+mcmc_dens_overlay(model_2)
+mcmc_acf(model_2)
+
+neff_ratio(model_2)
+rhat(model_2)
+```
+
+The MCMC diagnostics for the interaction terms comparing each year are all above .2, which to me is good enough. All the plots are also similar to the first model, which means they are stable and this is a good model to interpret.
+
+### Model results and interpretation
+
+```{r}
+tidy(model_2, conf.int = TRUE, conf.level = 0.80) %>% select(-std.error)
+```
+
+From this, we can see that 2021 is not significantly different from 2020, but 2022 is and estimates an increase in salary. This model also interestingly made the remote ratio not significant in any sense for salary.
+
+For the interaction terms, there is no significant interaction in any year for the remote ratio, so we cannot say that they affect each other and this model might not be the best due to all the insignificant relationships.
+
+# Model 3: Normal Hierarchy Model 1
+
+Now, accounting for the job title, we can make a hierarchy by separating the jobs into groups. While no pooling would be useful for each individual job title, I figure there will be some job titles that are related to others, while others that are not, so I want to find the general idea of salaries for data roles.
+
+This first hierarchy model will assume the slope is the same but will vary intercepts for each group
+
+### The model
+
+This model will continue to assume the mean being around 105000 and will group the data into job title. I will also use the predictors I noticed to be significant from the complete pooled model, like experience level, company size, and remote ratio.
+
+```{r}
+model_3 <- stan_glmer(
+  salary_in_usd ~ company_size + experience_level + factor(remote_ratio) + (1 | job_title), 
+  data = data, family = gaussian,
+  prior_intercept = normal(105000, 1000, autoscale = TRUE),
+  prior = normal(2.5, 1, autoscale = TRUE), 
+  prior_aux = exponential(1, autoscale = TRUE),
+  prior_covariance = decov(reg = 1, conc = 1, shape = 1, scale = 1),
+  chains = 4, iter = 5000*2, seed = 10000)
+```
+
+### MCMC Diagnostics
+
+```{r}
+min(neff_ratio(model_3))
+min(rhat(model_3))
+max(rhat(model_3))
+```
+
+The sample effective size ratio are all pretty high (above 0.24) and r hats are close to 1, so we can say these chains are stable and can be used for interpretation.
+
+### Model Interpretation
+
+```{r}
+tidy(model_3, effects = "fixed", 
+     conf.int = TRUE, conf.level = 0.80) %>% select(-std.error)
+```
+
+From this, we get similar results to the complete pooled model. The estimates are generally lower than the complete pooled model for the broad results. All the things that were significant before are also significant now except for the relationship between medium and large companies and in person vs completely remote is still an insignificant relationship.
+
+I want to see the salary distribution of the most popular jobs, so first I find which jobs are most common in the data frame below:
+
+```{r}
+as.data.frame(head(sort(table(data[order(data$job_title), ]$job_title),decreasing = TRUE)))
+```
+
+Next, I compare their salaries visually:
+
+```{r}
+as.data.frame(model_3) %>%  
+  mutate(general_salary = `(Intercept)`,
+         data_engineer = `(Intercept)`+ `b[(Intercept) job_title:Data_Engineer]`,
+         data_science = `(Intercept)`+ `b[(Intercept) job_title:Data_Scientist]`,
+         data_analyst = `(Intercept)`+ `b[(Intercept) job_title:Data_Analyst]`,
+         machine_learning = `(Intercept)`+ `b[(Intercept) job_title:Machine_Learning_Engineer]`,
+         analytics_engineer = `(Intercept)`+ `b[(Intercept) job_title:Analytics_Engineer]`,
+         data_architect = `(Intercept)`+ `b[(Intercept) job_title:Data_Architect]`)%>%
+  mcmc_areas(pars = c("general_salary","data_engineer","data_science","data_analyst","machine_learning","analytics_engineer","data_architect"))
+```
+
+It is interesting to note that the most popular roles, data engineer and data science, are regressing towards the mean salary of all roles denoted at the top. We can also wee that data analysts get paid much less compared to the other roles, while data_architects seem to get paid the most.
+
+There are other roles in this data set, but they tend to have much fewer data points, so these are the only ones with usable results.
+
+# Model 4: Normal Hierarchy Model 2
+
+Now, instead of only varying intercepts, we can vary the slopes for each job title. We will use the same predictors as before, but since experience level seems to be a very significant indicator of salary for any job title, we will specifically vary the slopes of each experience level of a given job title. This will vary the slopes for entry level, mid level, senior level, and executive level, but the slopes dependence on company size and remote ratio will all be the same.
+
+### The model
+
+```{r}
+model_4 <- stan_glmer(
+  salary_in_usd ~ company_size + experience_level + factor(remote_ratio) + (experience_level | job_title),
+  data = data, family = gaussian,
+  prior_intercept = normal(100005, 1000, autoscale = TRUE),
+  prior = normal(2.5, 1, autoscale = TRUE), 
+  prior_aux = exponential(1, autoscale = TRUE),
+  prior_covariance = decov(reg = 1, conc = 1, shape = 1, scale = 1),
+  chains = 4, iter = 5000*2, seed = 10000, adapt_delta = 0.01)
+```
+
+### MCMC Diagnostics
+
+Note that this model was taking an extremely long time. Even when I adapt_delta=0.01, it took a very long time. This made every sample diverge, which implies the complication this model adds is probably not worth the time it takes to run. I wouldn't think having the slopes vary for experience level would change our predictions too much anyway.
+
+It's not worth it to try to run this model, as it would take months for very minor improvements.
+
+# Best Model and Making Predictions
+
+To evaluate each model, we first analyze the data.
+
+We can trust where the data is collected because it is anonymized and publicly available information. There may be a few outliers because anyone can input the information, but I believe there is no reason to go through the hassle of the survey for an anonymous result.
+
+### Prior Predictive Check (ppc)
+
+To see which model to make predictions on, we first start with a ppcheck.
+
+```{r}
+pp_check(model_1) + 
+  labs(x = "net", title = "complete pooled model without interaction")
+pp_check(model_2) + 
+  labs(x = "net", title = "complete pooled model with interaction")
+pp_check(model_3) + 
+  labs(x = "net", title = "hierarchy model with variable intercept")
+pp_check(model_4) + 
+  labs(x = "net", title = "hierarchy model with variable intercept and slope")
+```
+
+From the ppcheck, we can see that plotting the 20,000 results from the chains have model 4 underestimating the actual salaries variation, while the other 3 seem to be very similar and measure the variability and prior salaries pretty closely.
+
+### Prediction Errors
+
+Next, we look at the posterior predictive accuracy through cross-validating the data.
+
+```{r}
+prediction_summary(model = model_1, data = data)
+
+prediction_summary(model = model_2, data = data)
+
+prediction_summary(model = model_3, data = data)
+
+prediction_summary(model = model_4, data = data)
+```
+
+```{r}
+predictions_1 <- posterior_predict(model_1, newdata = data)
+predictions_2 <- posterior_predict(model_2, newdata = data)
+predictions_3 <- posterior_predict(model_3, newdata = data)
+predictions_4 <- posterior_predict(model_4, newdata = data)
+
+ppc_violin_grouped(data$salary_in_usd, yrep = predictions_1, 
+                   group = data$experience_level, y_draw = "points") + 
+  labs(y = "Salary",x = "Experience Level", title = "Predictive Accuracy of model 1")
+
+ppc_violin_grouped(data$salary_in_usd, yrep = predictions_2, 
+                   group = data$experience_level, y_draw = "points") + 
+  labs(y = "Salary",x = "Experience Level", title = "Predictive Accuracy of model 2")
+
+ppc_violin_grouped(data$salary_in_usd, yrep = predictions_3, 
+                   group = data$experience_level, y_draw = "points") + 
+  labs(y = "Salary",x = "Experience Level", title = "Predictive Accuracy of model 3")
+
+ppc_violin_grouped(data$salary_in_usd, yrep = predictions_4, 
+                   group = data$experience_level, y_draw = "points") + 
+  labs(y = "Salary",x = "Experience Level", title = "Predictive Accuracy of model 4")
+```
+
+As we can see, the mae scaled for model 1 is .635, model 2 has .674, model 3 with .605, and model 4 has .493. This means model 4 had the best mae followed by model 3. They all also have close prediction bars within 50% or 95% of what they estimate.
+
+From the visuals, we can see most of the data points fall within the blue lines, but all models still tend to have some data points that they dont predict, which are in the 5%
+
+### ELPD using loo
+
+Now, we can look at the ELPD of each, using loo
+
+```{r}
+loo_1 <- loo(model_1)
+loo_2 <- loo(model_2)
+loo_3 <- loo(model_3)
+loo_4 <- loo(model_4)
+loo_compare(loo_1, loo_2, loo_3, loo_4)
+```
+
+From here, model_3 has the best ELPD and is farther than 2 standard deviations from any other model, so model 3 is the best in this diagnostic.
+
+## Best model
+
+Since model 3 had the best prior predictive accuracy and elpd, I'd say this is the best model. While model 4 was better at predicting with a lower mae, it failed the other diagnostics miserably. Model 4 is also very complicated and not worth the hassle to fully run.
+
+## Making predictions using model 3
+
+Since model 3 is the best and uses predictors of company size, remote ratio, and experience level, we will fill in these predictors to get a prediction
+
+```{r}
+predict_salary <- posterior_predict(
+  model_3, 
+  newdata = data.frame(job_title = c("Random Job", "Data Scientist", "Data Architect"),
+                       company_size = c('S','S','S'),
+                       remote_ratio = c('100','100','100'),
+                       experience_level = c("EN",'EN','EN')))
+
+mcmc_areas(predict_salary, prob = 0.8) +
+ ggplot2::scale_y_discrete(labels = c("Random Job", "Data Scientist", "Data Architect"))+scale_x_continuous(labels = scales::comma)+ labs(title = "Salary at a fully remote small company for entry level data jobs")
+summary(predict_salary) 
+```
+
+From these possible predictions, if I choose a random job, I am most likely to have a salary of 53000, but can be anywhere between 12000 and 94000 for for an entry level job in a small company that is fully remote given the general results.
+
+However, if I specify my search to be a data architect or data scientist with the same criteria, my salary as a data scientist would most likely be 55000 with a range between 20000 and 90000 and my salary as a data architect will most likely be 74000 with a range from 39000 to 110000.
+
+# Final Analysis
+
+After looking over 4 different types of models and interpreting the significance of their coefficients, we've found that the significant predictors of changes in salary are if a company is small or not, experience level, and if a company is hybrid or not. We also saw that there is no significant interaction between remote ratio and work year.
+
+We ended up looking at diagnostics for each model and found model 3 to be the most useful for making predictions. The results of this model can be interpreted as below:
+
+-   Being hybrid lowers salary compared to not being hybrid
+
+-   Being in a small company lowers salary compared to not being in a small company
+
+-   Experience level increases salary as expected, going up lowest to highest from entry level, mid level, senior level, and the highest at executive level
+
+Model 3 also found relations in specific job titles that tend to lower salary. Data analysts get paid much less compared to other jobs, while data architects seem to get paid the most for the popular data roles.
+
+Overall, these predictors will be useful for looking for which jobs to pick. Going for data architect roles in bigger companies that aren't hybrid will tend to give the most salary.
+
+# Honor Pledge
+
+On my honor, I have neither received nor given any unauthorized assistance on this project
+
+-   SIGNED: George Basta
