@@ -1,5 +1,5 @@
 ---
-title: "Final Project"
+title: "Job Salary Analysis"
 author: "George Basta"
 date: "2022-12-09"
 output: html_document
@@ -368,9 +368,3 @@ We ended up looking at diagnostics for each model and found model 3 to be the mo
 Model 3 also found relations in specific job titles that tend to lower salary. Data analysts get paid much less compared to other jobs, while data architects seem to get paid the most for the popular data roles.
 
 Overall, these predictors will be useful for looking for which jobs to pick. Going for data architect roles in bigger companies that aren't hybrid will tend to give the most salary.
-
-# Honor Pledge
-
-On my honor, I have neither received nor given any unauthorized assistance on this project
-
--   SIGNED: George Basta
