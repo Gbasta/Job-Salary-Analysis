@@ -16,4 +16,5 @@ The hierarchical model determines that there is no significant relationship betw
 * Being hybrid lowers salary compared to being in person or fully remote
 * Being in a small company lowers salary compared to being in any other sized company
 * Experience level increases salary as expected, going up from the lowest to highest ranging from entry level, mid level, senior level, and the highest at executive level
+
 The model also shows that, of the most popular data jobs, the jobs that are named "Data Architect" get paid the most, while "Data Analysts" get paid the least.
